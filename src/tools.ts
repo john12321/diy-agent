@@ -1,9 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import type { ToolDefinition } from "./provider.js";
 import {
   EXTENSION_LANGUAGE_MAP,
   EXTENSIONLESS_FILE_LANGUAGE_MAP,
@@ -42,13 +42,6 @@ function stripAnsiForAgentJson(str: string): string {
   }
   return result;
 }
-
-export type ToolDefinition = {
-  name: string;
-  description: string;
-  input_schema: Anthropic.Tool.InputSchema;
-  execute: (input: Record<string, unknown>) => Promise<string> | string;
-};
 
 // --- get_current_datetime tool ---
 export const DateTimeTool: ToolDefinition = {

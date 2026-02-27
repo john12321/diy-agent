@@ -1,6 +1,6 @@
 # DIY Agent
 
-This is a simple, extensible conversational AI agent that runs in your terminal and uses Anthropic's Claude models. It's designed to be easy to understand, modify, and extend with new tools.
+This is a simple, extensible conversational AI agent that runs in your terminal and supports pluggable model providers (currently Anthropic, AWS Bedrock, and OpenAI-compatible Chat Completions APIs). It's designed to be easy to understand, modify, and extend with new tools.
 
 It is a TS implementation of <https://ampcode.com/how-to-build-an-agent> to get some practice building an agent.
 
@@ -32,19 +32,49 @@ It is a TS implementation of <https://ampcode.com/how-to-build-an-agent> to get 
     ```
 
 3.  **Set up your environment variables:**
-    Create a file named `.env` in the root of the project directory and add your Anthropic API key:
+    Copy `.env.example` to `.env` and choose a provider.
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    **Anthropic**
 
     ```
+    AI_PROVIDER="anthropic"
     ANTHROPIC_API_KEY="your-api-key-here"
-    ```
-
-    You can also optionally specify a model:
-
-    ```
     ANTHROPIC_MODEL="claude-sonnet-4-20250514"
     ```
 
-    If `ANTHROPIC_MODEL` is not found either from .env or within the code, it will return an error message.
+    **AWS Bedrock**
+
+    ```
+    AI_PROVIDER="bedrock"
+    BEDROCK_MODEL="anthropic.claude..."
+    AWS_REGION="eu-west-2"
+    ```
+
+    **OpenAI-compatible API**
+
+    ```
+    AI_PROVIDER="openai"
+    OPENAI_API_KEY="your-api-key-here"
+    OPENAI_MODEL="gpt-4o-mini"
+    # Optional: defaults to https://api.openai.com/v1
+    OPENAI_BASE_URL="https://api.openai.com/v1"
+    ```
+
+    Bedrock credentials are resolved by the AWS SDK credential provider chain (e.g.: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, `AWS_PROFILE`, IAM role credentials).
+
+### Quick provider switch
+
+If your `.env` already contains valid keys/models for each provider, you can temporarily switch provider per run:
+
+```bash
+AI_PROVIDER=anthropic npm run dev
+AI_PROVIDER=bedrock npm run dev
+AI_PROVIDER=openai npm run dev
+```
 
 ## Usage
 

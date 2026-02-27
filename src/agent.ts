@@ -1,32 +1,33 @@
-import Anthropic from "@anthropic-ai/sdk";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { ToolDefinition } from "./tools.js";
+import {
+  type ContentBlock,
+  type Message,
+  type ModelProvider,
+  type ToolDefinition,
+  type ToolInputSchema,
+  type ToolResultBlock,
+  type ToolUseBlock
+} from "./provider.js";
 import { SYSTEM_PROMPT, MAX_TOOL_TURNS, COLOURS } from "./constants.js";
 
 export class Agent {
-  private readonly client: Anthropic;
+  private readonly provider: ModelProvider;
   private readonly getUserMessage: () => Promise<string | null>;
-  private readonly config: {
-    model: string;
-    maxTokens: number;
-  };
   private readonly tools: ToolDefinition[];
 
   constructor(
-    client: Anthropic,
+    provider: ModelProvider,
     getUserMessage: () => Promise<string | null>,
-    config: { model: string; maxTokens: number },
     tools: ToolDefinition[] = []
   ) {
-    this.client = client;
+    this.provider = provider;
     this.getUserMessage = getUserMessage;
-    this.config = config;
     this.tools = tools;
   }
 
   async run(): Promise<void> {
-    let conversation: Anthropic.MessageParam[] = [];
+    let conversation: Message[] = [];
 
     // Handle Ctrl+C (SIGINT)
     let isShuttingDown = false;
@@ -46,7 +47,7 @@ export class Agent {
     process.on("SIGTERM", handleSignal);
 
     try {
-      console.log("Chat with Claude (type 'exit' or 'quit' to stop)");
+      console.log("Chat with Agent (type 'exit' or 'quit' to stop)");
 
       while (true) {
         process.stdout.write(`${COLOURS.blue}You${COLOURS.reset}: `);
@@ -69,7 +70,7 @@ export class Agent {
           break;
         }
 
-        const userMessage: Anthropic.MessageParam = {
+        const userMessage: Message = {
           role: "user",
           content: userInput
         };
@@ -90,7 +91,7 @@ export class Agent {
           conversation = conversation.slice(sliceIndex);
         }
 
-        process.stdout.write(`${COLOURS.yellow}Claude${COLOURS.reset}: `);
+        process.stdout.write(`${COLOURS.yellow}Agent${COLOURS.reset}: `);
         const assistantMessage = await this.runInference(conversation);
         console.log(""); // New line after streaming completes
 
@@ -109,7 +110,7 @@ export class Agent {
     }
   }
 
-  private async saveConversation(conversation: Anthropic.MessageParam[]) {
+  private async saveConversation(conversation: Message[]) {
     if (conversation.length === 0) return;
 
     try {
@@ -128,34 +129,21 @@ export class Agent {
     }
   }
 
-  private async runInference(
-    conversation: Anthropic.MessageParam[]
-  ): Promise<Anthropic.ContentBlock[]> {
+  private async runInference(conversation: Message[]): Promise<ContentBlock[]> {
     let continueLoop = true;
-    let currentContent: Anthropic.ContentBlock[] = [];
+    let currentContent: ContentBlock[] = [];
     let toolTurns = 0;
 
     while (continueLoop) {
-      const params: Anthropic.MessageCreateParams = {
-        model: this.config.model,
-        max_tokens: this.config.maxTokens,
-        messages: conversation,
-        system: SYSTEM_PROMPT
-      };
-
-      if (this.tools.length > 0) {
-        params.tools = this.tools.map(tool => ({
-          name: tool.name,
-          description: tool.description,
-          input_schema: tool.input_schema
-        }));
-      }
-
-      const response = await this.client.messages.create(params);
+      const response = await this.provider.generateResponse(
+        conversation,
+        this.tools,
+        SYSTEM_PROMPT
+      );
       currentContent = response.content;
 
       const toolUseBlocks = currentContent.filter(
-        (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
+        (block): block is ToolUseBlock => block.type === "tool_use"
       );
 
       if (toolUseBlocks.length > 0 && response.stop_reason === "tool_use") {
@@ -192,10 +180,10 @@ export class Agent {
   }
 
   private async executeTools(
-    toolUseBlocks: Anthropic.ToolUseBlock[]
-  ): Promise<Anthropic.ToolResultBlockParam[]> {
+    toolUseBlocks: ToolUseBlock[]
+  ): Promise<ToolResultBlock[]> {
     const results = await Promise.all(
-      toolUseBlocks.map(async toolUse => {
+      toolUseBlocks.map(async (toolUse): Promise<ToolResultBlock> => {
         console.log(
           `\n${COLOURS.cyan}[Tool Use: ${toolUse.name}]${COLOURS.reset}`
         );
@@ -221,7 +209,7 @@ export class Agent {
             tool_use_id: toolUse.id,
             content: `Error: Tool ${toolUse.name} not found`,
             is_error: true
-          } as Anthropic.ToolResultBlockParam;
+          };
         }
 
         try {
@@ -254,16 +242,14 @@ export class Agent {
                   error: "Edit cancelled by user. The changes were not made."
                 }),
                 is_error: true
-              } as Anthropic.ToolResultBlockParam;
+              };
             }
             console.log(
               `${COLOURS.green}[User approved - proceeding with edit]${COLOURS.reset}`
             );
           }
 
-          const executionPromise = toolDef.execute(
-            toolUse.input as Record<string, unknown>
-          );
+          const executionPromise = toolDef.execute(toolUse.input);
 
           const timeoutPromise = new Promise<string>((_, reject) => {
             setTimeout(
@@ -288,7 +274,7 @@ export class Agent {
             type: "tool_result",
             tool_use_id: toolUse.id,
             content: result
-          } as Anthropic.ToolResultBlockParam;
+          };
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : String(error);
@@ -299,7 +285,7 @@ export class Agent {
             tool_use_id: toolUse.id,
             content: errorMessage,
             is_error: true
-          } as Anthropic.ToolResultBlockParam;
+          };
         }
       })
     );
@@ -307,10 +293,7 @@ export class Agent {
     console.log("");
     return results;
   }
-  private validateInput(
-    input: unknown,
-    schema: Anthropic.Tool.InputSchema
-  ): void {
+  private validateInput(input: unknown, schema: ToolInputSchema): void {
     if (typeof input !== "object" || input === null || Array.isArray(input)) {
       throw new Error("Input must be a valid object");
     }
